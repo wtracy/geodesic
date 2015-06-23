@@ -1,4 +1,4 @@
 # geodesic
-Generates geodesic dome geometry in Yafaray format
+Generates geodesic dome geometry 
 
 ![Example image](example.gif)
