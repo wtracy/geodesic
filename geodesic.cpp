@@ -23,16 +23,24 @@ struct Edge {
     center = -1;
   }
 
+  /* Generates a new vertex at the midpoint of the line (projected onto the 
+   * sphere) and two "child"
+   * lines spanning the midpoint and the respective end points of the
+   * original line.
+   */
   int split(std::vector<vector3d_t>& vertices, std::vector<Edge>& edges) {
-    if (center == -1) {
+    if (center == -1) { // if we haven't already done this
       vector3d_t v(0, 0, 0);
-      Edge edge;
+
+      // Create the new vertex
       v += vertices[a];
       v += vertices[b];
       v.normalize();
       vertices.push_back(v);
       center = vertices.size() - 1;
 
+      // Create the new edges
+      Edge edge;
 
       edge.set(a, center);
       edges.push_back(edge);
@@ -76,23 +84,37 @@ void printGLError(GLenum error) {
 
 
 
-
-void subdivide(Face& face, std::vector<vector3d_t> &vertices, std::vector<Edge>& edges, std::vector<Face> &faces, int count) {
-  if (count > 0) {
+/* Breaks the face into four triangles. The original triangle has vertices
+ * a, b, and c, while the children share both those and the new vertices
+ * d, e, and f.
+ */
+void subdivide(Face& face, std::vector<vector3d_t> &vertices, 
+               std::vector<Edge>& edges, 
+               std::vector<Face>& faces, 
+               int count) {
+  if (count > 0) { // if we haven't recursed too far
     Edge temp;
 
+    /* We always call split() on a temp variable because the addition of new lines
+     * will cause the std::vector to resize, and it might yank our edge
+     * out from under us.
+     */
+
+    /* Generate vertex d and attached lines. */
     temp = edges[face.ab];
     int d = temp.split(vertices, edges);
     edges[face.ab] = temp;
     int ad = edges[face.ab].childA;
     int db = edges[face.ab].childB;
 
+    // Generate vertex e and attached lines
     temp = edges[face.bc];
     int e = temp.split(vertices, edges);
     edges[face.bc] = temp;
     int be = edges[face.bc].childA;
     int ec = edges[face.bc].childB;
 
+    // Generate vertex f and attached lines
     temp = edges[face.ca];
     int f = temp.split(vertices, edges);
     edges[face.ca] = temp;
@@ -101,6 +123,7 @@ void subdivide(Face& face, std::vector<vector3d_t> &vertices, std::vector<Edge>&
 
     Edge edge;
 
+    // Create the edges interior to the original triangle
     edge.set(d, e);
     edges.push_back(edge);
     int de = edges.size() - 1;
@@ -115,6 +138,7 @@ void subdivide(Face& face, std::vector<vector3d_t> &vertices, std::vector<Edge>&
 
     Face face;
 
+    // Generate faces inside the new lines, and continue subdividing them
     face.set(ad, fd, fa);
     faces.push_back(face);
     subdivide(face, vertices, edges, faces, count - 1);
