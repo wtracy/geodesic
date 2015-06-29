@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <vector>
+#include <map>
+#include <utility>
 #include <assert.h>
 #include <time.h>
 #include <GL/gl.h>
@@ -9,62 +11,42 @@
 #include "vector3d.h"
 
 
-struct Edge {
-  int a;
-  int b;
-  int center;
-
-  int childA;
-  int childB;
-
-  void set(int aIn, int bIn) {
-    a = aIn;
-    b = bIn;
-    center = -1;
-  }
-
-  /* Generates a new vertex at the midpoint of the line (projected onto the 
-   * sphere) and two "child"
-   * lines spanning the midpoint and the respective end points of the
-   * original line.
-   */
-  int split(std::vector<vector3d_t>& vertices, std::vector<Edge>& edges) {
-    if (center == -1) { // if we haven't already done this
-      vector3d_t v(0, 0, 0);
-
-      // Create the new vertex
-      v += vertices[a];
-      v += vertices[b];
-      v.normalize();
-      vertices.push_back(v);
-      center = vertices.size() - 1;
-
-      // Create the new edges
-      Edge edge;
-
-      edge.set(a, center);
-      edges.push_back(edge);
-      childA = edges.size() - 1;
-
-      edge.set(center, b);
-      edges.push_back(edge);
-      childB = edges.size() - 1;
-    }
-    return center;
-  }
-};
 
 struct Face {
-  int ab;
-  int bc;
-  int ca;
+  int a;
+  int b;
+  int c;
 
-  void set(int a, int b, int c) {
-    ab = a;
-    bc = b;
-    ca = c;
+  void set(int _a, int _b, int _c) {
+    a = _a;
+    b = _b;
+    c = _c;
   }
 };
+
+struct UnpackedFace {
+  int a1;
+  int a2;
+  int b1;
+  int b2;
+  int c1;
+  int c2;
+
+  UnpackedFace(int _a1, int _a2, int _b1, int _b2, int _c1, int _c2) {
+    a1 = _a1;
+    a2 = _a2;
+    b1 = _b1;
+    b2 = _b2;
+    c1 = _c1;
+    c2 = _c2;
+  }
+};
+
+std::vector<vector3d_t> vertices;
+std::map<std::pair<int, int>, int> midpoints;
+std::vector<Face> faces;
+std::vector<UnpackedFace> unpackedFaces;
+
 
 void printGLError(GLenum error) {
   switch(error) {
@@ -81,101 +63,65 @@ void printGLError(GLenum error) {
   }
 }
 
+int getMidpoint(int a, int b) {
+  std::map<std::pair<int, int>, int>::iterator it;
+  it = midpoints.find(std::pair<int, int>(a, b));
 
+  if (it == midpoints.end()) {
+    vector3d_t midpoint = vertices[a];
+    midpoint += vertices[b];
+    midpoint.normalize();
+    vertices.push_back(midpoint);
+    int midpoint_index = vertices.size() - 1;
+
+    midpoints[std::pair<int, int>(a, b)] = midpoint_index;
+    midpoints[std::pair<int, int>(b, a)] = midpoint_index;
+
+    return midpoint_index;
+  } else {
+    const std::pair<const std::pair<int, int>, int> value = *it;
+    return value.second;
+  }
+}
 
 
 /* Breaks the face into four triangles. The original triangle has vertices
  * a, b, and c, while the children share both those and the new vertices
  * d, e, and f.
  */
-void subdivide(Face& face, std::vector<vector3d_t> &vertices, 
-               std::vector<Edge>& edges, 
-               std::vector<Face>& faces, 
+void subdivide(int a, int b, int c,
                int count) {
   if (count > 0) { // if we haven't recursed too far
-    Edge temp;
+    int d = getMidpoint(a, b);
+    int e = getMidpoint(b, c);
+    int f = getMidpoint(c, a);
 
-    /* We always call split() on a temp variable because the addition of new lines
-     * will cause the std::vector to resize, and it might yank our edge
-     * out from under us.
-     */
+    subdivide(a, d, f, count - 1);
+    subdivide(b, d, e, count - 1);
+    subdivide(c, e, f, count - 1);
+    subdivide(d, e, f, count - 1);
+  } else {
+    Face f;
+    f.set(a, b, c);
+    faces.push_back(f);
 
-    /* Generate vertex d and attached lines. */
-    temp = edges[face.ab];
-    int d = temp.split(vertices, edges);
-    edges[face.ab] = temp;
-    int ad = edges[face.ab].childA;
-    int db = edges[face.ab].childB;
-
-    // Generate vertex e and attached lines
-    temp = edges[face.bc];
-    int e = temp.split(vertices, edges);
-    edges[face.bc] = temp;
-    int be = edges[face.bc].childA;
-    int ec = edges[face.bc].childB;
-
-    // Generate vertex f and attached lines
-    temp = edges[face.ca];
-    int f = temp.split(vertices, edges);
-    edges[face.ca] = temp;
-    int cf = edges[face.ca].childA;
-    int fa = edges[face.ca].childB;
-
-    Edge edge;
-
-    // Create the edges interior to the original triangle
-    edge.set(d, e);
-    edges.push_back(edge);
-    int de = edges.size() - 1;
-
-    edge.set(e, f);
-    edges.push_back(edge);
-    int ef = edges.size() - 1;
-
-    edge.set(f, d);
-    edges.push_back(edge);
-    int fd = edges.size() - 1;
-
-    Face face;
-
-    // Generate faces inside the new lines, and continue subdividing them
-    face.set(ad, fd, fa);
-    faces.push_back(face);
-    subdivide(face, vertices, edges, faces, count - 1);
-
-    face.set(be, de, db);
-    faces.push_back(face);
-    subdivide(face, vertices, edges, faces, count - 1);
-
-    face.set(cf, ef, ec);
-    faces.push_back(face);
-    subdivide(face, vertices, edges, faces, count - 1);
-
-    face.set(de, ef, fd);
-    faces.push_back(face);
-    subdivide(face, vertices, edges, faces, count - 1);
+    UnpackedFace uf(a, b, b, c, c, a);
+    unpackedFaces.push_back(uf);
   }
 }
 
 
 int main(int argc, char**argv) {
-  assert(sizeof(PFLOAT) == sizeof(GLfloat));
-  assert(sizeof(vector3d_t) == 3 * sizeof(GLfloat));
-  assert(sizeof(Face) == 3 * sizeof(GLint));
-
-  std::vector<vector3d_t> vertices;
-  std::vector<Edge> edges;
-  std::vector<Face> faces;
   bool stillGoing = true;
 
   SDL_Init(SDL_INIT_VIDEO);
   SDL_WM_SetCaption("Geodesic", "Geodesic");
-  SDL_Surface* screen = SDL_SetVideoMode(640, 480, 32, SDL_HWSURFACE | SDL_DOUBLEBUF | SDL_OPENGL);
-  glClearColor(0, 0, 0, 1);
-  glViewport(0, 0, 640, 480);
+  SDL_Surface* screen = SDL_SetVideoMode(480, 480, 32, SDL_HWSURFACE | SDL_DOUBLEBUF | SDL_OPENGL);
+  glClearColor(1, 1, 1, 1);
+  glViewport(0, 0, 480, 480);
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  glOrtho(-2, 2, 2, -2, 1, -1);
+  glOrtho(-1.0, 1.0, 1.0, -1.0, 1, -1);
   glMatrixMode(GL_MODELVIEW);
   glEnable(GL_TEXTURE_2D);
   glLoadIdentity();
@@ -191,34 +137,10 @@ int main(int argc, char**argv) {
   vector.set(0, 1, 0);
   vertices.push_back(vector);
 
-  Edge edge;
-  edge.set(0, 1);
-  edges.push_back(edge);
-  edge.set(3, 0);
-  edges.push_back(edge);
-  edge.set(1, 2);
-  edges.push_back(edge);
-  edge.set(3, 1);
-  edges.push_back(edge);
-  edge.set(2, 0);
-  edges.push_back(edge);
-  edge.set(2, 3);
-  edges.push_back(edge);
-
-  int subdivisions = 6;
-  Face face;
-  face.set(0, 1, 3);
-  faces.push_back(face);
-  face.set(2, 3, 5);
-  faces.push_back(face);
-  face.set(4, 5, 1);
-  faces.push_back(face);
-
-  subdivide(faces[0], vertices, edges, faces, subdivisions);
-  subdivide(faces[1], vertices, edges, faces, subdivisions);
-  subdivide(faces[2], vertices, edges, faces, subdivisions);
-
-  printf("Vertex count: %d\n", vertices.size());
+  int divisions = 4;
+  subdivide(0, 1, 3, divisions);
+  subdivide(1, 2, 3, divisions);
+  subdivide(2, 0, 3, divisions);
   
   while (stillGoing) {
     SDL_Event event;
@@ -227,16 +149,18 @@ int main(int argc, char**argv) {
       stillGoing = false;
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glColor3f(0, 1, 0);
+    glColor3f(0, 0, 0);
     glPushMatrix();
     glLoadIdentity();
-    //glRotatef(clock() / 1000, 1, 0, 0);
+    //glRotatef(clock() / 2000, 1, 0, 0);
     glRotatef(90, 1, 0, 0);
 
     glEnableClientState(GL_VERTEX_ARRAY);
 
     glVertexPointer(3, GL_FLOAT, 0, &vertices[0]);
-    glDrawArrays(GL_POINTS, 0, vertices.size() - 0);
+    //glDrawArrays(GL_POINTS, 0, vertices.size() - 0);
+    glDrawElements(GL_LINES, unpackedFaces.size()*6, GL_UNSIGNED_INT, &unpackedFaces[0]);
+    //glDrawElements(GL_TRIANGLES, faces.size()*3, GL_UNSIGNED_INT, &faces[0]);
 
     glPopMatrix();
     glDisableClientState(GL_VERTEX_ARRAY);
